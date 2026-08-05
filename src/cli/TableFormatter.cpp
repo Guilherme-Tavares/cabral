@@ -27,6 +27,12 @@ void appendPadded(std::string& out, std::string_view text, std::size_t width) {
 } // namespace
 
 std::string formatHost(const HostResult& host, int verbosity) {
+    // Sem -v, host inativo não gera linha alguma: numa varredura de /24 os ausentes
+    // esconderiam os que respondem. O total aparece no resumo final.
+    if (!host.isUp && verbosity == 0) {
+        return {};
+    }
+
     std::ostringstream out;
 
     out << "\nScan report for " << host.address.toString();
@@ -37,6 +43,13 @@ std::string formatHost(const HostResult& host, int verbosity) {
 
     if (!host.isUp) {
         out << "Host seems to be down or unresponsive.\n";
+        return out.str();
+    }
+
+    // Ping sweep não varre portas: relatar a ausência de tabela como "sem portas abertas"
+    // sugeriria que houve varredura.
+    if (host.ports.empty()) {
+        out << "Host is up.\n";
         return out.str();
     }
 
@@ -122,6 +135,11 @@ std::string formatSummary(const ScanSummary& summary) {
         << ", " << summary.hostsUp << " up, " << summary.openPorts << " open port"
         << (summary.openPorts == 1 ? "" : "s") << '\n'
         << "Completed in " << std::fixed << std::setprecision(2) << seconds << " seconds\n";
+
+    // Sem esta linha o total de inativos sumiria da saída, já que eles não geram relatório.
+    if (summary.hostsScanned > summary.hostsUp) {
+        out << "Hosts that did not respond are omitted; pass -v to list them\n";
+    }
 
     return out.str();
 }

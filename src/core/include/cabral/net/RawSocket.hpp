@@ -56,6 +56,49 @@ private:
     Socket socket_;
 };
 
+/// Socket ICMP para echo request (ping sweep) e para recepção de mensagens de erro, entre
+/// elas o port unreachable que classifica porta UDP fechada. Requer CAP_NET_RAW.
+class RawIcmpSocket {
+public:
+    RawIcmpSocket();
+
+    bool isValid() const noexcept { return socket_.isValid(); }
+
+    /// Envia uma mensagem ICMP já montada. O kernel preenche o cabeçalho IP.
+    bool send(std::span<const std::uint8_t> message, IpAddress destination) noexcept;
+
+    std::size_t receive(std::span<std::uint8_t> buffer, std::chrono::milliseconds timeout) noexcept;
+
+private:
+    Socket socket_;
+};
+
+/// Socket UDP comum para as sondas de -sU. Não exige privilégio: o que exige é a recepção
+/// do ICMP de erro, feita por RawIcmpSocket.
+class UdpProbeSocket {
+public:
+    UdpProbeSocket();
+
+    bool isValid() const noexcept { return socket_.isValid(); }
+
+    bool sendTo(std::span<const std::uint8_t> payload, IpAddress destination, Port port) noexcept;
+
+    struct Datagram {
+        std::size_t size = 0;
+        IpAddress source;
+        Port sourcePort = 0;
+    };
+
+    /// Resposta UDP direta, que indica porta aberta sem ambiguidade. Devolve também a
+    /// origem: sem ela não há como saber qual sonda foi respondida, e atribuir a resposta
+    /// à porta errada inventaria um Open.
+    Datagram receiveFrom(std::span<std::uint8_t> buffer,
+                         std::chrono::milliseconds timeout) noexcept;
+
+private:
+    Socket socket_;
+};
+
 /// Descobre qual endereço local o sistema usaria para alcançar o destino. Necessário para
 /// preencher o campo de origem do cabeçalho IP e para o pseudo-header do checksum.
 ///

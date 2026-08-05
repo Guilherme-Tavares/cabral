@@ -5,6 +5,7 @@
 namespace cabral::net {
 namespace {
 
+constexpr std::uint8_t kProtocolIcmp = 1;
 constexpr std::uint8_t kProtocolTcp = 6;
 
 void writeUint16(std::uint8_t* out, std::uint16_t value) noexcept {
@@ -132,6 +133,74 @@ std::optional<TcpResponse> parseTcpResponse(std::span<const std::uint8_t> datagr
     response.acknowledgement = readUint32(tcp + 8);
     response.flags = tcp[13];
     return response;
+}
+
+std::array<std::uint8_t, kEchoPacketSize> buildEchoRequest(const EchoParams& params) noexcept {
+    std::array<std::uint8_t, kEchoPacketSize> packet{};
+
+    packet[0] = kIcmpEchoRequest;
+    packet[1] = 0;                     // código
+    writeUint16(packet.data() + 2, 0); // checksum preenchido abaixo
+    writeUint16(packet.data() + 4, params.identifier);
+    writeUint16(packet.data() + 6, params.sequence);
+
+    // O checksum ICMP cobre a mensagem inteira, sem pseudo-header.
+    writeUint16(packet.data() + 2, internetChecksum({packet.data(), packet.size()}));
+    return packet;
+}
+
+std::optional<IcmpMessage> parseIcmpMessage(std::span<const std::uint8_t> datagram) noexcept {
+    if (datagram.size() < kIpv4HeaderSize) {
+        return std::nullopt;
+    }
+    if (((datagram[0] >> 4) & 0x0F) != 4) {
+        return std::nullopt;
+    }
+
+    const std::size_t headerLength = static_cast<std::size_t>(datagram[0] & 0x0F) * 4;
+    if (headerLength < kIpv4HeaderSize || datagram.size() < headerLength + kIcmpHeaderSize) {
+        return std::nullopt;
+    }
+    if (datagram[9] != kProtocolIcmp) {
+        return std::nullopt;
+    }
+
+    const std::uint8_t* const icmp = datagram.data() + headerLength;
+
+    IcmpMessage message;
+    message.source = IpAddress(readUint32(datagram.data() + 12));
+    message.type = icmp[0];
+    message.code = icmp[1];
+
+    if (message.type == kIcmpEchoReply || message.type == kIcmpEchoRequest) {
+        message.identifier = readUint16(icmp + 4);
+        message.sequence = readUint16(icmp + 6);
+        return message;
+    }
+
+    // Tipo 3 cita o datagrama original: cabeçalho IP completo mais 8 octetos, que para UDP
+    // e TCP contêm as portas. É a única forma de saber qual sonda provocou o erro.
+    if (message.type == kIcmpDestinationUnreachable) {
+        const std::size_t quotedOffset = headerLength + kIcmpHeaderSize;
+        if (datagram.size() < quotedOffset + kIpv4HeaderSize) {
+            return message;
+        }
+
+        const std::uint8_t* const quoted = datagram.data() + quotedOffset;
+        const std::size_t quotedHeaderLength = static_cast<std::size_t>(quoted[0] & 0x0F) * 4;
+        if (quotedHeaderLength < kIpv4HeaderSize ||
+            datagram.size() < quotedOffset + quotedHeaderLength + 4) {
+            return message;
+        }
+
+        message.hasOriginalDatagram = true;
+        message.originalDestination = IpAddress(readUint32(quoted + 16));
+        message.originalProtocol = quoted[9];
+        message.originalSourcePort = readUint16(quoted + quotedHeaderLength + 0);
+        message.originalDestinationPort = readUint16(quoted + quotedHeaderLength + 2);
+    }
+
+    return message;
 }
 
 } // namespace cabral::net

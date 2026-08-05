@@ -1,4 +1,6 @@
 add_library(scanner_core STATIC
+    discovery/HostDiscovery.cpp
+    discovery/TargetExpander.cpp
     model/IpAddress.cpp
     model/PortRange.cpp
     model/PortState.cpp
@@ -8,6 +10,8 @@ add_library(scanner_core STATIC
     net/SocketError.cpp
     scan/ConnectScanner.cpp
     scan/SynScanner.cpp
+    scan/UdpPayloads.cpp
+    scan/UdpScanner.cpp
     services/ServiceTable.cpp
     ScanEngine.cpp
 )
@@ -22,13 +26,15 @@ if(WIN32)
     target_sources(scanner_core PRIVATE
         net/windows/Socket.cpp
         net/windows/Poller.cpp
-        net/windows/RawSocket.cpp)
+        net/windows/RawSocket.cpp
+        net/windows/Resolver.cpp)
     target_link_libraries(scanner_core PUBLIC ws2_32)
 else()
     target_sources(scanner_core PRIVATE
         net/posix/Socket.cpp
         net/posix/Poller.cpp
-        net/posix/RawSocket.cpp)
+        net/posix/RawSocket.cpp
+        net/posix/Resolver.cpp)
 endif()
 
 find_package(Threads REQUIRED)

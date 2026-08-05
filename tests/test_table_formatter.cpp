@@ -89,13 +89,42 @@ TEST(TableFormatter, OpenFilteredIsAlwaysShown) {
     EXPECT_TRUE(contains(text, "open|filtered"));
 }
 
-TEST(TableFormatter, DownHostIsReported) {
+/// Numa varredura de /24, listar os ausentes esconderia os que respondem. Sem -v eles não
+/// geram linha; com -v, sim.
+TEST(TableFormatter, DownHostIsOmittedUnlessVerbose) {
     HostResult host;
     host.address = *IpAddress::parse("10.0.0.1");
     host.isUp = false;
 
+    EXPECT_TRUE(formatHost(host, 0).empty());
+
+    const auto verbose = formatHost(host, 1);
+    EXPECT_TRUE(contains(verbose, "10.0.0.1"));
+    EXPECT_TRUE(contains(verbose, "down"));
+}
+
+/// Ping sweep não varre portas: dizer "sem portas abertas" sugeriria que houve varredura.
+TEST(TableFormatter, UpHostWithoutPortsReportsOnlyReachability) {
+    HostResult host;
+    host.address = *IpAddress::parse("10.0.0.1");
+    host.isUp = true;
+
     const auto text = formatHost(host, 0);
-    EXPECT_TRUE(contains(text, "down"));
+    EXPECT_TRUE(contains(text, "Host is up"));
+    EXPECT_FALSE(contains(text, "PORT"));
+}
+
+TEST(TableFormatter, SummaryMentionsOmittedHosts) {
+    ScanSummary summary;
+    summary.hostsScanned = 256;
+    summary.hostsUp = 9;
+
+    EXPECT_TRUE(contains(formatSummary(summary), "omitted"));
+
+    ScanSummary allUp;
+    allUp.hostsScanned = 2;
+    allUp.hostsUp = 2;
+    EXPECT_FALSE(contains(formatSummary(allUp), "omitted"));
 }
 
 TEST(TableFormatter, HostWithoutOpenPortsSaysSo) {

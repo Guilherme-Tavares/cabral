@@ -69,4 +69,71 @@ struct TcpResponse {
 /// segmento TCP.
 std::optional<TcpResponse> parseTcpResponse(std::span<const std::uint8_t> datagram) noexcept;
 
+// --- ICMP (RFC 792) ---
+
+constexpr std::uint8_t kIcmpEchoReply = 0;
+constexpr std::uint8_t kIcmpDestinationUnreachable = 3;
+constexpr std::uint8_t kIcmpEchoRequest = 8;
+
+/// Códigos de tipo 3 que interessam à varredura UDP.
+namespace icmp_code {
+constexpr std::uint8_t NetUnreachable = 1;
+constexpr std::uint8_t HostUnreachable = 2;
+constexpr std::uint8_t PortUnreachable = 3; // única evidência de porta UDP fechada
+constexpr std::uint8_t NetProhibited = 9;
+constexpr std::uint8_t HostProhibited = 10;
+constexpr std::uint8_t CommunicationProhibited = 13;
+} // namespace icmp_code
+
+constexpr std::size_t kIcmpHeaderSize = 8;
+constexpr std::size_t kEchoPacketSize = kIcmpHeaderSize;
+
+struct EchoParams {
+    std::uint16_t identifier = 0;
+    std::uint16_t sequence = 0;
+};
+
+/// Monta um ICMP echo request. O kernel preenche o cabeçalho IP para SOCK_RAW/IPPROTO_ICMP
+/// sem IP_HDRINCL, então só o corpo ICMP é montado aqui.
+std::array<std::uint8_t, kEchoPacketSize> buildEchoRequest(const EchoParams& params) noexcept;
+
+struct IcmpMessage {
+    IpAddress source;
+    std::uint8_t type = 0;
+    std::uint8_t code = 0;
+
+    /// Para echo reply: identificador e sequência ecoados de volta.
+    std::uint16_t identifier = 0;
+    std::uint16_t sequence = 0;
+
+    /// Para tipo 3: extraídos do datagrama original citado no corpo da mensagem. É por eles
+    /// que a resposta se correlaciona com a sonda que a provocou.
+    bool hasOriginalDatagram = false;
+    IpAddress originalDestination;
+    std::uint8_t originalProtocol = 0;
+    Port originalSourcePort = 0;
+    Port originalDestinationPort = 0;
+
+    bool isPortUnreachable() const noexcept {
+        return type == kIcmpDestinationUnreachable && code == icmp_code::PortUnreachable;
+    }
+
+    /// Bloqueio administrativo ou de rota: a sonda não chegou ao destino, o que é Filtered
+    /// e não Closed — não houve resposta da porta em si.
+    bool isFilteredIndication() const noexcept {
+        if (type != kIcmpDestinationUnreachable) {
+            return false;
+        }
+        return code == icmp_code::NetUnreachable || code == icmp_code::HostUnreachable ||
+               code == icmp_code::NetProhibited || code == icmp_code::HostProhibited ||
+               code == icmp_code::CommunicationProhibited;
+    }
+};
+
+/// Interpreta um datagrama IPv4 recebido em raw socket ICMP.
+///
+/// Para tipo 3, lê também o cabeçalho IP citado e os 8 octetos seguintes, que contêm as
+/// portas de origem e destino do datagrama que causou o erro.
+std::optional<IcmpMessage> parseIcmpMessage(std::span<const std::uint8_t> datagram) noexcept;
+
 } // namespace cabral::net

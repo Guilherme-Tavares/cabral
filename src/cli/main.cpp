@@ -1,7 +1,9 @@
 #include <cabral/ScanEngine.hpp>
+#include <cabral/discovery/TargetExpander.hpp>
 #include <cabral/model/IpAddress.hpp>
 #include <cabral/model/PortState.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <span>
@@ -29,20 +31,36 @@ std::string_view describe(cabral::ScanType type) noexcept {
     return "unknown";
 }
 
-/// Fase 2 aceita apenas IPv4 literal. Hostname, CIDR e ranges entram na fase 4, junto com
-/// discovery/; até lá, recusar é mais honesto do que varrer o alvo errado.
-bool resolveTargets(const std::vector<std::string>& literals, std::vector<cabral::IpAddress>& out) {
-    bool ok = true;
-    for (const auto& text : literals) {
-        if (const auto address = cabral::IpAddress::parse(text)) {
-            out.push_back(*address);
-        } else {
-            std::cerr << "cabral: cannot resolve '" << text
-                      << "'; only literal IPv4 addresses are supported in this build\n";
-            ok = false;
+/// Expande alvos literais e o arquivo de -iL em endereços concretos.
+bool resolveTargets(const cabral::cli::ParsedArguments& options,
+                    std::vector<cabral::IpAddress>& out) {
+    cabral::discovery::ExpansionOptions expansion;
+    expansion.allowLargeRange = options.config.allowLargeRange;
+
+    if (!options.targets.empty()) {
+        auto expanded = cabral::discovery::expandTargets(options.targets, expansion);
+        if (!expanded) {
+            std::cerr << "cabral: " << cabral::discovery::describe(expanded.error()) << '\n';
+            return false;
         }
+        const auto& values = expanded.value();
+        out.insert(out.end(), values.begin(), values.end());
     }
-    return ok;
+
+    if (!options.targetListFile.empty()) {
+        auto expanded = cabral::discovery::expandTargetFile(options.targetListFile, expansion);
+        if (!expanded) {
+            std::cerr << "cabral: " << options.targetListFile << ": "
+                      << cabral::discovery::describe(expanded.error()) << '\n';
+            return false;
+        }
+        const auto& values = expanded.value();
+        out.insert(out.end(), values.begin(), values.end());
+    }
+
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return true;
 }
 
 } // namespace
@@ -69,27 +87,22 @@ int main(int argc, char** argv) {
         break;
     }
 
-    if (options.config.scanType == cabral::ScanType::Udp ||
-        options.config.scanType == cabral::ScanType::PingSweep) {
-        std::cerr << "cabral: " << describe(options.config.scanType)
-                  << " scan is not implemented yet; use -sT or -sS\n";
-        return 3;
-    }
-    if (!options.targetListFile.empty()) {
-        std::cerr << "cabral: -iL is not implemented yet\n";
-        return 3;
-    }
     if (options.topPorts > 0) {
         std::cerr << "cabral: --top-ports is not implemented yet; use -p\n";
         return 3;
     }
 
     std::vector<cabral::IpAddress> targets;
-    if (!resolveTargets(options.targets, targets) || targets.empty()) {
+    if (!resolveTargets(options, targets)) {
+        return 2;
+    }
+    if (targets.empty()) {
+        std::cerr << "cabral: no targets to scan\n";
         return 2;
     }
 
-    std::cout << "Starting cabral 0.1.0\n";
+    std::cout << "Starting cabral 0.1.0 (" << describe(options.config.scanType) << " scan, "
+              << targets.size() << " host" << (targets.size() == 1 ? "" : "s") << ")\n";
 
     ScanSummary summary;
     summary.hostsScanned = targets.size();

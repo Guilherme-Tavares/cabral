@@ -18,6 +18,9 @@ struct ScanSummary {
 
 /// Tabela de um host. Portas fechadas são resumidas em uma linha: listar 998 linhas
 /// "closed" afogaria as poucas que interessam.
+///
+/// Hosts inativos produzem saída vazia sem -v, pela mesma razão: numa varredura de /24 os
+/// 247 hosts ausentes esconderiam os 9 que respondem. A contagem aparece no resumo final.
 std::string formatHost(const HostResult& host, int verbosity);
 
 std::string formatSummary(const ScanSummary& summary);

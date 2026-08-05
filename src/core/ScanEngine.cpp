@@ -1,7 +1,9 @@
 #include <cabral/ScanEngine.hpp>
+#include <cabral/discovery/HostDiscovery.hpp>
 #include <cabral/net/RawSocket.hpp>
 #include <cabral/scan/ConnectScanner.hpp>
 #include <cabral/scan/SynScanner.hpp>
+#include <cabral/scan/UdpScanner.hpp>
 #include <cabral/services/ServiceTable.hpp>
 
 #include <algorithm>
@@ -19,8 +21,9 @@ std::unique_ptr<scan::IScanStrategy> makeStrategy(ScanType type) {
         return std::make_unique<scan::ConnectScanner>();
     case ScanType::Syn:
         return std::make_unique<scan::SynScanner>();
-    // -sU e -sn entram na fase 4.
     case ScanType::Udp:
+        return std::make_unique<scan::UdpScanner>();
+    // -sn não varre portas: a descoberta é feita direto pelo worker.
     case ScanType::PingSweep:
         return nullptr;
     }
@@ -72,8 +75,9 @@ struct ScanEngine::Impl {
     }
 
     void runWorker(std::stop_token stop) {
-        auto strategy = makeStrategy(config.scanType);
-        if (!strategy) {
+        const bool sweepOnly = config.scanType == ScanType::PingSweep;
+        auto strategy = sweepOnly ? nullptr : makeStrategy(config.scanType);
+        if (!sweepOnly && !strategy) {
             return;
         }
 
@@ -87,13 +91,31 @@ struct ScanEngine::Impl {
 
             HostResult host;
             host.address = target;
-            host.ports = strategy->scan(target, config.ports, config, stop);
 
-            // Host up se alguma porta respondeu de fato, aberta ou fechada. Só filtrado
-            // não é evidência de host ativo.
-            host.isUp = std::any_of(host.ports.begin(), host.ports.end(), [](const PortResult& p) {
-                return p.state == PortState::Open || p.state == PortState::Closed;
-            });
+            if (sweepOnly) {
+                host.isUp = discovery::isHostUp(target, config, stop);
+            } else {
+                host.ports = strategy->scan(target, config.ports, config, stop);
+
+                // Host up exige resposta de fato: aberta ou fechada. Filtrado não prova
+                // que o host existe.
+                //
+                // No UDP, porém, a ausência de resposta é o resultado normal e produz
+                // OpenFiltered em toda porta. Tratar isso como host inativo apagaria o
+                // relatório inteiro, escondendo justamente o estado que -sU existe para
+                // reportar. Nesse caso a varredura fala por si.
+                const bool answered =
+                    std::any_of(host.ports.begin(), host.ports.end(), [](const PortResult& p) {
+                        return p.state == PortState::Open || p.state == PortState::Closed;
+                    });
+                const bool udpAmbiguous =
+                    config.scanType == ScanType::Udp &&
+                    std::any_of(host.ports.begin(), host.ports.end(), [](const PortResult& p) {
+                        return p.state == PortState::OpenFiltered;
+                    });
+
+                host.isUp = answered || udpAmbiguous;
+            }
 
             for (auto& port : host.ports) {
                 const auto name = services.lookup(port.port, port.protocol);
@@ -147,22 +169,39 @@ void ScanEngine::start(std::vector<IpAddress> targets, ScanCallbacks callbacks) 
         return;
     }
 
-    auto strategy = makeStrategy(impl_->config.scanType);
-    if (!strategy) {
+    const bool sweepOnly = impl_->config.scanType == ScanType::PingSweep;
+    auto strategy = sweepOnly ? nullptr : makeStrategy(impl_->config.scanType);
+
+    if (!sweepOnly && !strategy) {
         impl_->log(LogLevel::Error, "selected scan type is not implemented yet");
         impl_->running = false;
         return;
     }
 
     // Falta de privilégio precisa virar orientação antes da varredura começar, não EPERM
-    // cru no meio dela.
-    if (strategy->requiresRawSocket()) {
+    // cru no meio dela. O ping sweep é exceção: sem CAP_NET_RAW ele ainda funciona pelo
+    // fallback TCP, com menos alcance.
+    if (strategy && strategy->requiresRawSocket()) {
         const auto capability = net::probeRawCapability();
         if (capability != net::RawCapability::Available) {
             impl_->log(LogLevel::Error, net::rawCapabilityAdvice(capability));
             impl_->running = false;
             return;
         }
+    }
+    if (sweepOnly && net::probeRawCapability() != net::RawCapability::Available) {
+        impl_->log(LogLevel::Warning,
+                   "no CAP_NET_RAW: host discovery falls back to TCP probes on 80 and 443, "
+                   "so hosts that ignore them will be reported as down");
+    }
+
+    // -sU envia por socket comum, mas sem ICMP não observa port unreachable: toda porta
+    // que não responder fica OpenFiltered, sem distinguir fechada de filtrada.
+    if (impl_->config.scanType == ScanType::Udp &&
+        net::probeRawCapability() != net::RawCapability::Available) {
+        impl_->log(LogLevel::Warning,
+                   "no raw ICMP access: closed UDP ports cannot be distinguished from "
+                   "filtered ones, so unanswered ports are reported as open|filtered");
     }
 
     const auto timing = parametersFor(impl_->config.timing);

@@ -1,6 +1,7 @@
 #include <cabral/ScanEngine.hpp>
 #include <cabral/model/IpAddress.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <mutex>
@@ -176,6 +177,40 @@ TEST(ScanEngine, DestructorStopsRunningScan) {
     const auto elapsed = std::chrono::steady_clock::now() - started;
 
     EXPECT_LT(std::chrono::duration_cast<std::chrono::seconds>(elapsed).count(), 10);
+}
+
+/// No UDP a ausência de resposta é o resultado normal e produz OpenFiltered em toda porta.
+/// Tratar isso como host inativo apagaria o relatório inteiro, escondendo o estado que -sU
+/// existe para reportar.
+TEST(ScanEngine, UdpHostWithOnlyOpenFilteredPortsIsStillReported) {
+    auto config = configFor({53, 123, 161});
+    config.scanType = ScanType::Udp;
+    config.timeoutOverride = std::chrono::milliseconds(100);
+
+    ScanEngine engine(std::move(config));
+
+    std::mutex mutex;
+    std::vector<HostResult> hosts;
+    ScanCallbacks callbacks;
+    callbacks.onHostComplete = [&](const HostResult& host) {
+        std::lock_guard lock(mutex);
+        hosts.push_back(host);
+    };
+
+    // 10.255.255.1 não responde: sem privilégio o scanner devolve Unknown, com privilégio
+    // devolve OpenFiltered. Em nenhum dos casos o host pode sumir do relatório.
+    engine.start({*IpAddress::parse("10.255.255.1")}, std::move(callbacks));
+    engine.wait();
+
+    ASSERT_EQ(hosts.size(), 1u);
+    EXPECT_EQ(hosts[0].ports.size(), 3u);
+
+    const bool anyOpenFiltered =
+        std::any_of(hosts[0].ports.begin(), hosts[0].ports.end(),
+                    [](const auto& p) { return p.state == cabral::PortState::OpenFiltered; });
+    if (anyOpenFiltered) {
+        EXPECT_TRUE(hosts[0].isUp) << "OpenFiltered ports must not be hidden as a down host";
+    }
 }
 
 TEST(LogLevel, EveryLevelHasName) {
