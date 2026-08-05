@@ -191,8 +191,10 @@ void ScanEngine::start(std::vector<IpAddress> targets, ScanCallbacks callbacks) 
     const bool sweepOnly = impl_->config.scanType == ScanType::PingSweep;
     auto strategy = sweepOnly ? nullptr : makeStrategy(impl_->config.scanType);
 
+    // Inalcançável hoje: todos os tipos têm estratégia. A guarda existe para que um tipo
+    // novo sem implementação falhe com mensagem, em vez de desreferenciar nulo.
     if (!sweepOnly && !strategy) {
-        impl_->log(LogLevel::Error, "selected scan type is not implemented yet");
+        impl_->log(LogLevel::Error, "no scan strategy for the selected scan type");
         impl_->running = false;
         return;
     }

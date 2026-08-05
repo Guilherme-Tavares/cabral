@@ -24,6 +24,7 @@ add_executable(cabral_tests
     test_target_expander.cpp
     test_udp_and_icmp.cpp
     test_scan_engine.cpp
+    test_result_writer.cpp
     test_table_formatter.cpp
 )
 

@@ -96,19 +96,6 @@ Result<ParsedArguments, ParseError> parseArguments(std::span<const std::string_v
             }
             parsed.config.ports = std::move(ports).value();
             portsGiven = true;
-        } else if (arg == "--top-ports") {
-            auto value = takeValue(args, i, arg);
-            if (!value) {
-                return Failure(std::move(value).error());
-            }
-            auto count = parseInt(value.value(), arg);
-            if (!count) {
-                return Failure(std::move(count).error());
-            }
-            if (count.value() <= 0 || count.value() > 65535) {
-                return Failure(error("--top-ports expects a value between 1 and 65535"));
-            }
-            parsed.topPorts = count.value();
         } else if (arg == "--timeout") {
             auto value = takeValue(args, i, arg);
             if (!value) {
@@ -151,13 +138,9 @@ Result<ParsedArguments, ParseError> parseArguments(std::span<const std::string_v
     if (parsed.targets.empty() && parsed.targetListFile.empty()) {
         return Failure(error("no target specified; see --help"));
     }
-    if (portsGiven && parsed.topPorts > 0) {
-        return Failure(error("-p and --top-ports are mutually exclusive"));
-    }
-
-    // Sem -p nem --top-ports, varrer as portas privilegiadas é o padrão sensato: cobre os
-    // serviços usuais sem transformar a chamada sem argumentos em uma varredura completa.
-    if (!portsGiven && parsed.topPorts == 0 && parsed.config.scanType != ScanType::PingSweep) {
+    // Sem -p, varrer as portas privilegiadas é o padrão sensato: cobre os serviços usuais
+    // sem transformar a chamada sem argumentos em uma varredura completa.
+    if (!portsGiven && parsed.config.scanType != ScanType::PingSweep) {
         auto defaults = parsePortSpec("1-1024");
         if (defaults) {
             parsed.config.ports = std::move(defaults).value();
@@ -176,7 +159,7 @@ Usage:
 Scan types:
   -sT              connect scan (default, no privileges required)
   -sS              SYN scan (requires CAP_NET_RAW, Linux only)
-  -sU              UDP scan (requires CAP_NET_RAW)
+  -sU              UDP scan (needs CAP_NET_RAW to tell closed from filtered)
   -sn              host discovery only
 
 Host discovery:
@@ -184,7 +167,6 @@ Host discovery:
 
 Ports:
   -p <spec>        22 | 1-1024 | 22,80,443 | - (all)
-  --top-ports <n>  scan the n most common ports
 
 Timing:
   -T<0-5>          timing profile (default -T3)

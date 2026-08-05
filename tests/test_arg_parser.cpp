@@ -79,10 +79,15 @@ TEST(ArgParser, ParsesFlagsAndOutputs) {
     EXPECT_EQ(parsed.config.outputPath, "out.json");
 }
 
-TEST(ArgParser, ParsesTargetListAndTopPorts) {
-    const auto parsed = parseOk({"-iL", "targets.txt", "--top-ports", "100"});
+TEST(ArgParser, ParsesTargetListFile) {
+    const auto parsed = parseOk({"-iL", "targets.txt"});
     EXPECT_EQ(parsed.targetListFile, "targets.txt");
-    EXPECT_EQ(parsed.topPorts, 100);
+}
+
+/// --top-ports foi removido em vez de aceito e recusado depois: uma flag que o --help não
+/// menciona e o parser aceita seria promessa fantasma.
+TEST(ArgParser, TopPortsIsNotAccepted) {
+    EXPECT_FALSE(parse({"--top-ports", "100", "h"}).hasValue());
 }
 
 TEST(ArgParser, AcceptsMultipleTargets) {
@@ -122,12 +127,7 @@ TEST(ArgParser, RejectsInvalidValues) {
     EXPECT_FALSE(parse({"-p", "http", "h"}).hasValue());
     EXPECT_FALSE(parse({"--timeout", "0", "h"}).hasValue());
     EXPECT_FALSE(parse({"--timeout", "abc", "h"}).hasValue());
-    EXPECT_FALSE(parse({"--top-ports", "0", "h"}).hasValue());
     EXPECT_FALSE(parse({"-T6", "h"}).hasValue());
-}
-
-TEST(ArgParser, RejectsPortsCombinedWithTopPorts) {
-    EXPECT_FALSE(parse({"-p", "80", "--top-ports", "10", "h"}).hasValue());
 }
 
 TEST(ArgParser, ErrorMessageIsNotEmpty) {

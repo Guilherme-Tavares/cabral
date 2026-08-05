@@ -19,7 +19,6 @@ struct ParsedArguments {
     ScanConfig config;
     std::vector<std::string> targets; // literais; expansão de CIDR fica em discovery/
     std::string targetListFile;       // -iL
-    int topPorts = 0;                 // --top-ports; 0 = não solicitado
 };
 
 struct ParseError {

@@ -1,5 +1,6 @@
 #include <cabral/ScanEngine.hpp>
 #include <cabral/model/IpAddress.hpp>
+#include <cabral/net/RawSocket.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -115,7 +116,9 @@ TEST(ScanEngine, EmptyTargetListCompletesImmediately) {
     EXPECT_FALSE(engine.isRunning());
 }
 
-TEST(ScanEngine, UnimplementedScanTypeLogsAndStops) {
+/// -sS exige raw socket. Sem privilégio a varredura precisa parar antes de começar, com
+/// orientação de como resolver — não com EPERM cru no meio.
+TEST(ScanEngine, SynScanWithoutPrivilegeStopsWithGuidance) {
     auto config = configFor({80});
     config.scanType = ScanType::Syn;
 
@@ -132,8 +135,19 @@ TEST(ScanEngine, UnimplementedScanTypeLogsAndStops) {
     engine.start({*IpAddress::parse("127.0.0.1")}, std::move(callbacks));
     engine.wait();
 
-    EXPECT_FALSE(messages.empty());
     EXPECT_FALSE(engine.isRunning());
+
+    if (cabral::net::probeRawCapability() == cabral::net::RawCapability::Available) {
+        GTEST_SKIP() << "raw sockets available; this test covers the unprivileged path";
+    }
+
+    ASSERT_FALSE(messages.empty());
+    const bool mentionsRemedy =
+        std::any_of(messages.begin(), messages.end(), [](const std::string& message) {
+            return message.find("setcap") != std::string::npos ||
+                   message.find("-sT") != std::string::npos;
+        });
+    EXPECT_TRUE(mentionsRemedy) << "the message must say how to proceed";
 }
 
 TEST(ScanEngine, StopRequestEndsScanPromptly) {

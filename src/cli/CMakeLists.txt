@@ -2,6 +2,7 @@
 # main().
 add_library(cabral_cli STATIC
     ArgParser.cpp
+    ResultWriter.cpp
     TableFormatter.cpp)
 
 target_include_directories(cabral_cli PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

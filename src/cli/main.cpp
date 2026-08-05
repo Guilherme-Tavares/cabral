@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "ArgParser.hpp"
+#include "ResultWriter.hpp"
 #include "TableFormatter.hpp"
 
 namespace {
@@ -87,11 +88,6 @@ int main(int argc, char** argv) {
         break;
     }
 
-    if (options.topPorts > 0) {
-        std::cerr << "cabral: --top-ports is not implemented yet; use -p\n";
-        return 3;
-    }
-
     std::vector<cabral::IpAddress> targets;
     if (!resolveTargets(options, targets)) {
         return 2;
@@ -111,6 +107,11 @@ int main(int argc, char** argv) {
 
     cabral::ScanEngine engine(options.config);
 
+    // Guardados para a exportação. O ScanEngine já serializa os callbacks, mas o vetor é
+    // lido depois do wait(), quando nenhuma worker resta.
+    const bool exporting = !options.config.outputPath.empty();
+    std::vector<cabral::HostResult> collected;
+
     cabral::ScanCallbacks callbacks;
     callbacks.onHostComplete = [&](const cabral::HostResult& host) {
         if (host.isUp) {
@@ -120,6 +121,9 @@ int main(int argc, char** argv) {
             if (port.state == cabral::PortState::Open) {
                 ++summary.openPorts;
             }
+        }
+        if (exporting) {
+            collected.push_back(host);
         }
         std::cout << cabral::cli::formatHost(host, options.config.verbosity);
     };
@@ -146,5 +150,26 @@ int main(int argc, char** argv) {
         std::chrono::steady_clock::now() - started);
 
     std::cout << cabral::cli::formatSummary(summary);
+
+    if (exporting) {
+        // Ordena por endereço: os hosts chegam na ordem em que as workers terminam, que
+        // varia entre execuções e tornaria os arquivos difíceis de comparar.
+        std::sort(collected.begin(), collected.end(),
+                  [](const cabral::HostResult& a, const cabral::HostResult& b) {
+                      return a.address < b.address;
+                  });
+
+        const std::string contents = (options.config.outputFormat == cabral::OutputFormat::Json)
+                                         ? cabral::cli::toJson(collected, summary, options.config)
+                                         : cabral::cli::toText(collected, summary);
+
+        std::string error;
+        if (!cabral::cli::writeToFile(options.config.outputPath, contents, error)) {
+            std::cerr << "cabral: " << error << '\n';
+            return 5;
+        }
+        std::cout << "Results written to " << options.config.outputPath << '\n';
+    }
+
     return 0;
 }
