@@ -31,6 +31,15 @@ if(WIN32)
     target_link_libraries(cabral_tests PRIVATE ws2_32)
 endif()
 
+# A ponte entre o engine e o loop de render só existe onde a GUI é construída. Os fontes
+# entram direto: depender do alvo cabral-gui arrastaria ImGui e GLFW para os testes.
+if(CABRAL_BUILD_GUI)
+    target_sources(cabral_tests PRIVATE
+        test_gui_plumbing.cpp
+        ${CMAKE_SOURCE_DIR}/src/gui/ResultQueue.cpp
+        ${CMAKE_SOURCE_DIR}/src/gui/ScanController.cpp)
+endif()
+
 target_link_libraries(cabral_tests PRIVATE
     cabral_cli
     cabral::scanner_core

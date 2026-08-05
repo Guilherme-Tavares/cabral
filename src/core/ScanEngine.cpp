@@ -62,6 +62,10 @@ struct ScanEngine::Impl {
     std::atomic<std::size_t> completed{0};
     std::atomic<bool> running{false};
 
+    /// Workers ainda não encerrados. O último a sair baixa `running`, para que um
+    /// consumidor não bloqueante — a GUI — perceba o fim sem chamar wait().
+    std::atomic<std::size_t> activeWorkers{0};
+
     // Serializa os callbacks: eles disparam de várias threads e um consumidor ingênuo
     // (a CLI escrevendo em stdout) entrelaçaria a saída.
     std::mutex callbackMutex;
@@ -75,6 +79,17 @@ struct ScanEngine::Impl {
     }
 
     void runWorker(std::stop_token stop) {
+        // Baixa `running` quando o último worker sai, independentemente do caminho de
+        // saída — inclusive o retorno antecipado logo abaixo.
+        struct ExitGuard {
+            Impl& impl;
+            ~ExitGuard() {
+                if (impl.activeWorkers.fetch_sub(1) == 1) {
+                    impl.running = false;
+                }
+            }
+        } guard{*this};
+
         const bool sweepOnly = config.scanType == ScanType::PingSweep;
         auto strategy = sweepOnly ? nullptr : makeStrategy(config.scanType);
         if (!sweepOnly && !strategy) {
@@ -211,6 +226,10 @@ void ScanEngine::start(std::vector<IpAddress> targets, ScanCallbacks callbacks) 
     const auto timing = parametersFor(impl_->config.timing);
     const std::size_t poolSize =
         std::max<std::size_t>(1, std::min(timing.hostConcurrency, impl_->targets.size()));
+
+    // Contabiliza antes de criar: um worker que termine de imediato não pode zerar a conta
+    // enquanto os demais ainda estão sendo lançados.
+    impl_->activeWorkers = poolSize;
 
     impl_->workers.reserve(poolSize);
     for (std::size_t i = 0; i < poolSize; ++i) {
