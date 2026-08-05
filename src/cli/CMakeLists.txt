@@ -1,5 +1,8 @@
-# Separado do executável para que os testes exercitem o parser sem passar por main().
-add_library(cabral_cli STATIC ArgParser.cpp)
+# Separado do executável para que os testes exercitem parser e formatter sem passar por
+# main().
+add_library(cabral_cli STATIC
+    ArgParser.cpp
+    TableFormatter.cpp)
 
 target_include_directories(cabral_cli PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(cabral_cli

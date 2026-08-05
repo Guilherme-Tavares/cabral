@@ -12,11 +12,20 @@ FetchContent_Declare(googletest
 FetchContent_MakeAvailable(googletest)
 
 add_executable(cabral_tests
+    TestListener.cpp
     test_ip_address.cpp
     test_port_range.cpp
     test_arg_parser.cpp
     test_result.cpp
+    test_service_table.cpp
+    test_connect_scanner.cpp
+    test_scan_engine.cpp
+    test_table_formatter.cpp
 )
+
+if(WIN32)
+    target_link_libraries(cabral_tests PRIVATE ws2_32)
+endif()
 
 target_link_libraries(cabral_tests PRIVATE
     cabral_cli

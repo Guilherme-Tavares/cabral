@@ -1,13 +1,19 @@
+#include <cabral/ScanEngine.hpp>
+#include <cabral/model/IpAddress.hpp>
 #include <cabral/model/PortState.hpp>
 
+#include <chrono>
 #include <iostream>
 #include <span>
 #include <string_view>
 #include <vector>
 
 #include "ArgParser.hpp"
+#include "TableFormatter.hpp"
 
 namespace {
+
+using cabral::cli::ScanSummary;
 
 std::string_view describe(cabral::ScanType type) noexcept {
     switch (type) {
@@ -23,6 +29,22 @@ std::string_view describe(cabral::ScanType type) noexcept {
     return "unknown";
 }
 
+/// Fase 2 aceita apenas IPv4 literal. Hostname, CIDR e ranges entram na fase 4, junto com
+/// discovery/; até lá, recusar é mais honesto do que varrer o alvo errado.
+bool resolveTargets(const std::vector<std::string>& literals, std::vector<cabral::IpAddress>& out) {
+    bool ok = true;
+    for (const auto& text : literals) {
+        if (const auto address = cabral::IpAddress::parse(text)) {
+            out.push_back(*address);
+        } else {
+            std::cerr << "cabral: cannot resolve '" << text
+                      << "'; only literal IPv4 addresses are supported in this build\n";
+            ok = false;
+        }
+    }
+    return ok;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -34,9 +56,9 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    const auto& result = parsed.value();
+    const auto& options = parsed.value();
 
-    switch (result.action) {
+    switch (options.action) {
     case cabral::cli::Action::ShowHelp:
         std::cout << cabral::cli::usageText();
         return 0;
@@ -47,15 +69,58 @@ int main(int argc, char** argv) {
         break;
     }
 
-    // Fase 1 encerra na intenção: o ScanEngine entra na Fase 2.
-    std::cout << "scan type: " << describe(result.config.scanType) << '\n';
-    std::cout << "ports:     " << result.config.ports.size() << '\n';
-    std::cout << "timeout:   " << result.config.effectiveTimeout().count() << " ms\n";
-    std::cout << "targets:   ";
-    for (std::size_t i = 0; i < result.targets.size(); ++i) {
-        std::cout << (i > 0 ? ", " : "") << result.targets[i];
+    if (options.config.scanType != cabral::ScanType::Connect) {
+        std::cerr << "cabral: " << describe(options.config.scanType)
+                  << " scan is not implemented yet; use -sT\n";
+        return 3;
     }
-    std::cout << '\n';
-    std::cout << "\nscanning is not implemented yet (phase 1)\n";
+    if (!options.targetListFile.empty()) {
+        std::cerr << "cabral: -iL is not implemented yet\n";
+        return 3;
+    }
+    if (options.topPorts > 0) {
+        std::cerr << "cabral: --top-ports is not implemented yet; use -p\n";
+        return 3;
+    }
+
+    std::vector<cabral::IpAddress> targets;
+    if (!resolveTargets(options.targets, targets) || targets.empty()) {
+        return 2;
+    }
+
+    std::cout << "Starting cabral 0.1.0\n";
+
+    ScanSummary summary;
+    summary.hostsScanned = targets.size();
+
+    const auto started = std::chrono::steady_clock::now();
+
+    cabral::ScanEngine engine(options.config);
+
+    cabral::ScanCallbacks callbacks;
+    callbacks.onHostComplete = [&](const cabral::HostResult& host) {
+        if (host.isUp) {
+            ++summary.hostsUp;
+        }
+        for (const auto& port : host.ports) {
+            if (port.state == cabral::PortState::Open) {
+                ++summary.openPorts;
+            }
+        }
+        std::cout << cabral::cli::formatHost(host, options.config.verbosity);
+    };
+    callbacks.onLog = [&](cabral::LogLevel level, std::string_view message) {
+        if (level >= cabral::LogLevel::Warning || options.config.verbosity > 0) {
+            std::cerr << "cabral: " << message << '\n';
+        }
+    };
+
+    engine.start(std::move(targets), std::move(callbacks));
+    engine.wait();
+
+    summary.elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started);
+
+    std::cout << cabral::cli::formatSummary(summary);
     return 0;
 }
