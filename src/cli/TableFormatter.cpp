@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <iomanip>
 #include <sstream>
+#include <string>
+#include <vector>
 
 namespace cabral::cli {
 namespace {
@@ -62,13 +64,23 @@ std::string formatHost(const HostResult& host, int verbosity) {
         }
     }
 
+    // Uma única linha de resumo: duas linhas "Not shown" separadas sugeririam que se trata
+    // de contagens de coisas distintas, quando ambas são portas omitidas da tabela.
+    std::vector<std::string> omitted;
     if (closedCount > 0) {
-        out << "Not shown: " << closedCount << " closed port" << (closedCount == 1 ? "" : "s")
-            << '\n';
+        omitted.push_back(std::to_string(closedCount) + " closed");
     }
     if (filteredCount > 0 && verbosity == 0) {
-        out << "Not shown: " << filteredCount << " filtered port" << (filteredCount == 1 ? "" : "s")
-            << '\n';
+        omitted.push_back(std::to_string(filteredCount) + " filtered");
+    }
+
+    if (!omitted.empty()) {
+        const std::size_t total = closedCount + (verbosity == 0 ? filteredCount : 0);
+        out << "Not shown: ";
+        for (std::size_t i = 0; i < omitted.size(); ++i) {
+            out << (i > 0 ? ", " : "") << omitted[i];
+        }
+        out << " port" << (total == 1 ? "" : "s") << '\n';
     }
 
     if (shown.empty()) {

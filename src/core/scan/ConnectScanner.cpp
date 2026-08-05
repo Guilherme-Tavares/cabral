@@ -11,6 +11,10 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
+/// Teto da espera do poll. Limita quanto tempo o laço pode passar sem reavaliar o
+/// stop_token, sem transformar a espera em polling ativo.
+constexpr auto kMaxPollSlice = std::chrono::milliseconds(100);
+
 struct Probe {
     net::Socket socket;
     Port port = 0;
@@ -118,8 +122,15 @@ std::vector<PortResult> ConnectScanner::scan(const IpAddress& target, std::span<
         if (slice.count() < 0) {
             slice = std::chrono::milliseconds::zero();
         }
+        // Teto na espera para que o cancelamento seja notado em tempo útil: sem ele, um
+        // requestStop() logo após o início ficaria retido pelo timeout inteiro, que nos
+        // perfis lentos chega a segundos.
+        slice = std::min(slice, kMaxPollSlice);
 
         poller.wait(events, slice);
+        if (stop.stop_requested()) {
+            break;
+        }
 
         for (const auto& event : events) {
             const auto it = inFlight.find(event.handle);

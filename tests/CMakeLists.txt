@@ -19,6 +19,8 @@ add_executable(cabral_tests
     test_result.cpp
     test_service_table.cpp
     test_connect_scanner.cpp
+    test_packet_builder.cpp
+    test_syn_scanner.cpp
     test_scan_engine.cpp
     test_table_formatter.cpp
 )

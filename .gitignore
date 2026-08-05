@@ -3,6 +3,9 @@ CLAUDE.md
 docs/
 reference/
 
+# Lab environment (local only)
+scripts/
+
 # Build
 build/
 out/

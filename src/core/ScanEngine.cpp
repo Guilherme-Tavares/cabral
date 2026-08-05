@@ -1,5 +1,7 @@
 #include <cabral/ScanEngine.hpp>
+#include <cabral/net/RawSocket.hpp>
 #include <cabral/scan/ConnectScanner.hpp>
+#include <cabral/scan/SynScanner.hpp>
 #include <cabral/services/ServiceTable.hpp>
 
 #include <algorithm>
@@ -15,8 +17,9 @@ std::unique_ptr<scan::IScanStrategy> makeStrategy(ScanType type) {
     switch (type) {
     case ScanType::Connect:
         return std::make_unique<scan::ConnectScanner>();
-    // -sS, -sU e -sn entram nas fases 3 e 4; até lá, connect é o único caminho real.
     case ScanType::Syn:
+        return std::make_unique<scan::SynScanner>();
+    // -sU e -sn entram na fase 4.
     case ScanType::Udp:
     case ScanType::PingSweep:
         return nullptr;
@@ -144,10 +147,22 @@ void ScanEngine::start(std::vector<IpAddress> targets, ScanCallbacks callbacks) 
         return;
     }
 
-    if (!makeStrategy(impl_->config.scanType)) {
+    auto strategy = makeStrategy(impl_->config.scanType);
+    if (!strategy) {
         impl_->log(LogLevel::Error, "selected scan type is not implemented yet");
         impl_->running = false;
         return;
+    }
+
+    // Falta de privilégio precisa virar orientação antes da varredura começar, não EPERM
+    // cru no meio dela.
+    if (strategy->requiresRawSocket()) {
+        const auto capability = net::probeRawCapability();
+        if (capability != net::RawCapability::Available) {
+            impl_->log(LogLevel::Error, net::rawCapabilityAdvice(capability));
+            impl_->running = false;
+            return;
+        }
     }
 
     const auto timing = parametersFor(impl_->config.timing);

@@ -3,8 +3,11 @@ add_library(scanner_core STATIC
     model/PortRange.cpp
     model/PortState.cpp
     model/ScanConfig.cpp
+    net/PacketBuilder.cpp
+    net/RawCapability.cpp
     net/SocketError.cpp
     scan/ConnectScanner.cpp
+    scan/SynScanner.cpp
     services/ServiceTable.cpp
     ScanEngine.cpp
 )
@@ -18,12 +21,14 @@ target_link_libraries(scanner_core PRIVATE cabral_warnings)
 if(WIN32)
     target_sources(scanner_core PRIVATE
         net/windows/Socket.cpp
-        net/windows/Poller.cpp)
+        net/windows/Poller.cpp
+        net/windows/RawSocket.cpp)
     target_link_libraries(scanner_core PUBLIC ws2_32)
 else()
     target_sources(scanner_core PRIVATE
         net/posix/Socket.cpp
-        net/posix/Poller.cpp)
+        net/posix/Poller.cpp
+        net/posix/RawSocket.cpp)
 endif()
 
 find_package(Threads REQUIRED)

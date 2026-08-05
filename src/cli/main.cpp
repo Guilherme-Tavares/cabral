@@ -69,9 +69,10 @@ int main(int argc, char** argv) {
         break;
     }
 
-    if (options.config.scanType != cabral::ScanType::Connect) {
+    if (options.config.scanType == cabral::ScanType::Udp ||
+        options.config.scanType == cabral::ScanType::PingSweep) {
         std::cerr << "cabral: " << describe(options.config.scanType)
-                  << " scan is not implemented yet; use -sT\n";
+                  << " scan is not implemented yet; use -sT or -sS\n";
         return 3;
     }
     if (!options.targetListFile.empty()) {
@@ -109,7 +110,11 @@ int main(int argc, char** argv) {
         }
         std::cout << cabral::cli::formatHost(host, options.config.verbosity);
     };
+    bool failed = false;
     callbacks.onLog = [&](cabral::LogLevel level, std::string_view message) {
+        if (level == cabral::LogLevel::Error) {
+            failed = true;
+        }
         if (level >= cabral::LogLevel::Warning || options.config.verbosity > 0) {
             std::cerr << "cabral: " << message << '\n';
         }
@@ -117,6 +122,12 @@ int main(int argc, char** argv) {
 
     engine.start(std::move(targets), std::move(callbacks));
     engine.wait();
+
+    // Varredura abortada não deve sair com sucesso nem imprimir um resumo vazio como se
+    // tivesse concluído.
+    if (failed) {
+        return 4;
+    }
 
     summary.elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - started);

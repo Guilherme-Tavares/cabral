@@ -63,6 +63,21 @@ TEST(TableFormatter, ClosedPortsAreSummarisedNotListed) {
     EXPECT_FALSE(contains(text, "150/tcp"));
 }
 
+/// Fechadas e filtradas somam numa linha só: duas linhas "Not shown" separadas sugeririam
+/// contagens de coisas distintas.
+TEST(TableFormatter, CombinesClosedAndFilteredInOneLine) {
+    std::vector<PortResult> ports{makePort(80, PortState::Open, "http")};
+    ports.push_back(makePort(21, PortState::Closed));
+    for (cabral::Port p = 100; p < 105; ++p) {
+        ports.push_back(makePort(p, PortState::Filtered));
+    }
+
+    const auto text = formatHost(hostWith(std::move(ports)), 0);
+    EXPECT_TRUE(contains(text, "Not shown: 1 closed, 5 filtered ports"));
+    // Uma linha, não duas.
+    EXPECT_EQ(text.find("Not shown"), text.rfind("Not shown"));
+}
+
 TEST(TableFormatter, FilteredPortsHiddenWithoutVerbose) {
     const auto host = hostWith({makePort(80, PortState::Filtered)});
     EXPECT_FALSE(contains(formatHost(host, 0), "80/tcp"));
