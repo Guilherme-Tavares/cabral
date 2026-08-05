@@ -1,0 +1,21 @@
+# Reference artifacts
+CLAUDE.md
+docs/
+reference/
+
+# Build
+build/
+out/
+.vs/
+.cache/
+CMakeUserPresets.json
+compile_commands.json
+
+# Binaries and intermediates
+*.exe
+*.obj
+*.o
+*.a
+*.lib
+*.pdb
+*.ilk
