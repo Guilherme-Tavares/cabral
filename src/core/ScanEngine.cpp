@@ -114,7 +114,11 @@ struct ScanEngine::Impl {
                         return p.state == PortState::OpenFiltered;
                     });
 
-                host.isUp = answered || udpAmbiguous;
+                // -Pn afirma que o alvo está ativo e que a descoberta deve ser pulada.
+                // Sem isto, um host que só produz portas filtradas seria dado como inativo
+                // e teria o relatório inteiro suprimido — justamente o caso em que -Pn é
+                // usado.
+                host.isUp = answered || udpAmbiguous || config.skipHostDiscovery;
             }
 
             for (auto& port : host.ports) {

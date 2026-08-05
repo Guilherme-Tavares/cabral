@@ -213,6 +213,32 @@ TEST(ScanEngine, UdpHostWithOnlyOpenFilteredPortsIsStillReported) {
     }
 }
 
+/// -Pn afirma que o alvo está ativo. Um host que só produz portas filtradas não pode ter o
+/// relatório suprimido como "inativo" — é exatamente o caso em que -Pn se usa.
+TEST(ScanEngine, SkipHostDiscoveryForcesHostToBeReportedUp) {
+    auto config = configFor({22, 80});
+    config.skipHostDiscovery = true;
+    config.timeoutOverride = std::chrono::milliseconds(100);
+
+    ScanEngine engine(std::move(config));
+
+    std::mutex mutex;
+    std::vector<HostResult> hosts;
+    ScanCallbacks callbacks;
+    callbacks.onHostComplete = [&](const HostResult& host) {
+        std::lock_guard lock(mutex);
+        hosts.push_back(host);
+    };
+
+    // 10.255.255.1 não responde: sem -Pn seria classificado como inativo.
+    engine.start({*IpAddress::parse("10.255.255.1")}, std::move(callbacks));
+    engine.wait();
+
+    ASSERT_EQ(hosts.size(), 1u);
+    EXPECT_TRUE(hosts[0].isUp) << "-Pn must not let an unresponsive host be hidden";
+    EXPECT_EQ(hosts[0].ports.size(), 2u);
+}
+
 TEST(LogLevel, EveryLevelHasName) {
     for (auto level : {cabral::LogLevel::Debug, cabral::LogLevel::Info, cabral::LogLevel::Warning,
                        cabral::LogLevel::Error}) {
